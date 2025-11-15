@@ -1,0 +1,101 @@
+name: "Java-like-Csharp — 3OS Build + ProofLedger + Release"
+
+on:
+  push:
+    branches: [ main ]
+    tags-ignore: [ 'v*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: java-like-csharp-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-3os:
+    name: "Build — ${{ matrix.os }}"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      # -----------------------------------------
+      # CHECKOUT
+      # -----------------------------------------
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # -----------------------------------------
+      # INSTALL DOTNET
+      # -----------------------------------------
+      - name: Setup Dotnet
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      # -----------------------------------------
+      # BUILD
+      # -----------------------------------------
+      - name: Build Project
+        run: |
+          mkdir -p dist
+          dotnet restore
+          dotnet build -c Release
+          dotnet publish -c Release -o dist
+
+      # -----------------------------------------
+      # GENERATE PROOF LEDGER
+      # -----------------------------------------
+      - name: Generate ProofLedger
+        run: |
+          echo "Repository: Java-like-Csharp" > proofledger-${{ matrix.os }}.txt
+          echo "Commit: $GITHUB_SHA" >> proofledger-${{ matrix.os }}.txt
+          echo "Branch: $GITHUB_REF_NAME" >> proofledger-${{ matrix.os }}.txt
+          echo "OS: ${{ matrix.os }}" >> proofledger-${{ matrix.os }}.txt
+          echo "Build Time: $(date)" >> proofledger-${{ matrix.os }}.txt
+          echo "-----------------------------" >> proofledger-${{ matrix.os }}.txt
+          sha256sum dist/* >> proofledger-${{ matrix.os }}.txt || shasum -a 256 dist/* >> proofledger-${{ matrix.os }}.txt
+
+      # -----------------------------------------
+      # UPLOAD ARTIFACTS (per OS)
+      # -----------------------------------------
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: java-like-csharp-${{ matrix.os }}
+          path: |
+            dist/**
+            proofledger-${{ matrix.os }}.txt
+
+  # -----------------------------------------
+  # MERGE ALL OS ARTIFACTS INTO RELEASE ZIP
+  # -----------------------------------------
+  merge-artifacts:
+    name: "Merge All Artifacts"
+    needs: [build-3os]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: merged
+
+      - name: Create Final Zip
+        run: |
+          cd merged
+          zip -r java-like-csharp-allos.zip .
+
+      - name: Upload Final Zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: java-like-csharp-release-bundle
+          path: merged/java-like-csharp-allos.zip
